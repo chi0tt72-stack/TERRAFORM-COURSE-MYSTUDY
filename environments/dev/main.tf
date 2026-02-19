@@ -37,3 +37,12 @@ module "storage" {
   versioning_enabled = var.s3_versioning_enabled
   tags              = var.tags
 }
+
+module "cloudwatch" {
+  source = "../../modules/cloudwatch"
+
+  environment     = var.environment
+  aws_region      = var.aws_region
+  instance_ids    = module.compute.instance_ids
+  s3_bucket_name  = module.storage.bucket_id
+}

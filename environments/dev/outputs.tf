@@ -17,3 +17,8 @@ output "s3_bucket_name" {
   description = "S3 bucket name"
   value       = module.storage.bucket_id
 }
+
+output "cloudwatch_dashboard_name" {
+  description = "CloudWatch dashboard name"
+  value       = module.cloudwatch.dashboard_name
+}
