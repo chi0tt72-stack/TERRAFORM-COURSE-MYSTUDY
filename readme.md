@@ -66,3 +66,29 @@ git add .
 git commit -m "your message"
 git push
 ```
+
+## Git Commands that are good to know
+```
+git checkout main 
+git checkout tf-env-fix
+git fetch origin
+git merge origin/main
+git push origin your-branch-name
+```
+
+## More Good to Know 
+
+To merge a branch into main in Git, switch to the main branch (git checkout main), pull the latest changes (git pull origin main), and merge your feature branch using git merge <branch-name>. Resolve any conflicts, then push the updated main to the remote repository. 
+
+Local Git Command Line Steps
+
+```
+Switch to the main branch:
+git checkout main
+Pull the latest changes from remote:
+git pull origin main
+Merge your feature branch into main:
+git merge <your-branch-name>
+Push the changes to remote:
+git push origin main 
+```
