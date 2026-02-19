@@ -6,11 +6,11 @@ availability_zones    = ["us-east-1a", "us-east-1b"]
 instance_count        = 1
 instance_type         = "t3.micro"
 allowed_ssh_cidrs     = ["0.0.0.0/0"]
-bucket_prefix         = "terraform-course-mystudy"
+bucket_prefix         = "chiotttfprojecttest"
 s3_versioning_enabled = true
 
 tags = {
-  Project     = "terraform-course-curor"
+  Project     = "terraform-course-cursor"
   Environment = "dev-cursor"
   ManagedBy   = "terraform"
 }
