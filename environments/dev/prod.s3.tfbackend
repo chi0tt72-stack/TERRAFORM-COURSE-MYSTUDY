@@ -1,0 +1,4 @@
+    bucket = "elastic-s3-native-connector-chiottc"
+    key    = "terraform-prod.tfstate"
+    region = "us-east-1"
+    use_lockfile = true
