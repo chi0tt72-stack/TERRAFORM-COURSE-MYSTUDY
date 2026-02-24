@@ -11,4 +11,10 @@ terraform {
       version = "~> 3.0"
     }
   }
+
+  backend "s3" {
+    bucket = "multivar-databricks-chiottcbucket"
+    key    = "terraform.tfstate"
+    region = "us-east-1"
+  }
 }
