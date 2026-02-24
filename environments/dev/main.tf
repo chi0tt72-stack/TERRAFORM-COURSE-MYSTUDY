@@ -6,14 +6,6 @@ resource "random_id" "suffix" {
   byte_length = 4
 }
 
-terraform {
-  backend "s3" {
-    bucket = "my-terraform-study-dev-1234567890"
-    key    = "terraform.tfstate"
-    region = "us-east-1"
-  }
-}
-
 module "networking" {
   source = "../../modules/networking"
 
