@@ -1,3 +1,48 @@
+# SNS Topic for CloudWatch Alarms
+resource "aws_sns_topic" "cloudwatch_alarms" {
+  name = "${var.environment}-cloudwatch-alarms"
+}
+
+# CloudWatch Alarms for EC2 CPU
+resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
+  for_each = toset(var.instance_ids)
+
+  alarm_name          = "${var.environment}-ec2-cpu-high-${each.value}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.cpu_alarm_threshold
+  alarm_description   = "Triggers when EC2 CPU exceeds ${var.cpu_alarm_threshold}%"
+  alarm_actions       = var.enable_sns_notifications ? [aws_sns_topic.cloudwatch_alarms.arn] : []
+
+  dimensions = {
+    InstanceId = each.value
+  }
+}
+
+# CloudWatch Alarms for EC2 Status Check
+resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
+  for_each = toset(var.instance_ids)
+
+  alarm_name          = "${var.environment}-ec2-status-check-${each.value}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "StatusCheckFailed"
+  namespace           = "AWS/EC2"
+  period              = 300
+  statistic           = "Maximum"
+  threshold           = 0
+  alarm_description   = "Triggers when EC2 status check fails"
+  alarm_actions       = var.enable_sns_notifications ? [aws_sns_topic.cloudwatch_alarms.arn] : []
+
+  dimensions = {
+    InstanceId = each.value
+  }
+}
+
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "${var.environment}-infrastructure-dashboard"
 
@@ -19,6 +64,13 @@ resource "aws_cloudwatch_dashboard" "main" {
           view = "timeSeries"
           stat = "Average"
           period = 300
+          annotations = {
+            horizontal = [{
+              value = var.cpu_alarm_threshold
+              label = "Alarm Threshold"
+              fill  = "above"
+            }]
+          }
         }
       }],
       # EC2 Network In

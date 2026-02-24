@@ -42,6 +42,9 @@ terraform apply
 | EC2 | t3.micro instance(s) in public subnet |
 | S3 | Bucket for storage (name includes random suffix) |
 | Security Group | SSH (22) and HTTP (80) allowed |
+| CloudWatch Dashboard | Real-time metrics for EC2 and S3 |
+| CloudWatch Alarms | CPU utilization and status check alarms |
+| SNS Topic | Notification channel for alarms (optional) |
 
 ## Outputs
 
@@ -51,6 +54,31 @@ After `terraform apply`:
 - `instance_public_ips` — EC2 public IPs
 - `instance_public_dns` — EC2 public DNS names
 - `s3_bucket_name` — S3 bucket name
+- `cloudwatch_dashboard_name` — CloudWatch dashboard name
+- `cloudwatch_sns_topic_arn` — SNS topic ARN for alarms
+- `cloudwatch_alarm_names` — List of CloudWatch alarm names
+
+## CloudWatch Monitoring
+
+The environment includes comprehensive CloudWatch monitoring:
+
+- Dashboard with EC2 CPU, network, and S3 metrics
+- Alarms for high CPU utilization (default: 80%)
+- Alarms for EC2 status check failures
+- Optional SNS notifications (set `enable_sns_notifications = true`)
+
+To view your dashboard:
+```bash
+# Get the dashboard name from outputs
+terraform output cloudwatch_dashboard_name
+
+# Or visit AWS Console > CloudWatch > Dashboards
+```
+
+To enable email notifications:
+1. Set `enable_sns_notifications = true` in terraform.tfvars
+2. Apply the changes
+3. Subscribe to the SNS topic via AWS Console or CLI
 
 ## Cleanup
 

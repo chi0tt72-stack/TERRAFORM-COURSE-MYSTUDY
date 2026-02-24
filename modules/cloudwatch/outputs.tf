@@ -7,3 +7,16 @@ output "dashboard_arn" {
   description = "ARN of the CloudWatch dashboard"
   value       = aws_cloudwatch_dashboard.main.dashboard_arn
 }
+
+output "sns_topic_arn" {
+  description = "ARN of the SNS topic for CloudWatch alarms"
+  value       = aws_sns_topic.cloudwatch_alarms.arn
+}
+
+output "alarm_names" {
+  description = "Names of CloudWatch alarms"
+  value = concat(
+    [for alarm in aws_cloudwatch_metric_alarm.ec2_cpu_high : alarm.alarm_name],
+    [for alarm in aws_cloudwatch_metric_alarm.ec2_status_check : alarm.alarm_name]
+  )
+}

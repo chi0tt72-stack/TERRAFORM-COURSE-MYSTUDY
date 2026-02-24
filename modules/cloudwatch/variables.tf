@@ -18,3 +18,15 @@ variable "s3_bucket_name" {
   type        = string
   default     = ""
 }
+
+variable "cpu_alarm_threshold" {
+  description = "CPU utilization threshold for alarms (percentage)"
+  type        = number
+  default     = 80
+}
+
+variable "enable_sns_notifications" {
+  description = "Enable SNS notifications for alarms"
+  type        = bool
+  default     = true
+}

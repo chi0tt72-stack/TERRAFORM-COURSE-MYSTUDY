@@ -22,3 +22,13 @@ output "cloudwatch_dashboard_name" {
   description = "CloudWatch dashboard name"
   value       = module.cloudwatch.dashboard_name
 }
+
+output "cloudwatch_sns_topic_arn" {
+  description = "SNS topic ARN for CloudWatch alarms"
+  value       = module.cloudwatch.sns_topic_arn
+}
+
+output "cloudwatch_alarm_names" {
+  description = "CloudWatch alarm names"
+  value       = module.cloudwatch.alarm_names
+}

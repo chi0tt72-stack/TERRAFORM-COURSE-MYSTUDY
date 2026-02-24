@@ -54,3 +54,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "cpu_alarm_threshold" {
+  description = "CPU utilization threshold for CloudWatch alarms"
+  type        = number
+  default     = 80
+}
+
+variable "enable_sns_notifications" {
+  description = "Enable SNS notifications for CloudWatch alarms"
+  type        = bool
+  default     = true
+}

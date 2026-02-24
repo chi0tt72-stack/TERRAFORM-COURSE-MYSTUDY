@@ -41,8 +41,10 @@ module "storage" {
 module "cloudwatch" {
   source = "../../modules/cloudwatch"
 
-  environment     = var.environment
-  aws_region      = var.aws_region
-  instance_ids    = module.compute.instance_ids
-  s3_bucket_name  = module.storage.bucket_id
+  environment              = var.environment
+  aws_region               = var.aws_region
+  instance_ids             = module.compute.instance_ids
+  s3_bucket_name           = module.storage.bucket_id
+  cpu_alarm_threshold      = var.cpu_alarm_threshold
+  enable_sns_notifications = var.enable_sns_notifications
 }
