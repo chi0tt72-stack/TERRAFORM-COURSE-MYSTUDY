@@ -8,7 +8,8 @@ My Terraform Testing Repo — AWS infrastructure with modular design.
 ├── modules/
 │   ├── networking/     # VPC, subnets, internet gateway
 │   ├── compute/        # EC2 instances, security groups
-│   └── storage/        # S3 bucket
+│   ├── storage/        # S3 bucket
+│   └── cloudwatch/     # CloudWatch alarms, dashboard, SNS topic
 ├── environments/
 │   └── dev/            # Dev environment config
 └── .gitignore
@@ -42,6 +43,9 @@ terraform apply
 | EC2 | t3.micro instance(s) in public subnet |
 | S3 | Bucket for storage (name includes random suffix) |
 | Security Group | SSH (22) and HTTP (80) allowed |
+| CloudWatch Alarms | CPU high (80% threshold) and status check alarms per EC2 instance |
+| CloudWatch Dashboard | Infrastructure dashboard with EC2 (CPU, Network In/Out) and S3 metrics |
+| SNS Topic | Topic for CloudWatch alarm notifications (when enabled) |
 
 ## Outputs
 
@@ -51,6 +55,9 @@ After `terraform apply`:
 - `instance_public_ips` — EC2 public IPs
 - `instance_public_dns` — EC2 public DNS names
 - `s3_bucket_name` — S3 bucket name
+- `cloudwatch_dashboard_name` — CloudWatch infrastructure dashboard name
+- `cloudwatch_sns_topic_arn` — SNS topic ARN for alarm notifications
+- `cloudwatch_alarm_names` — Names of CloudWatch CPU and status check alarms
 
 ## Cleanup
 
