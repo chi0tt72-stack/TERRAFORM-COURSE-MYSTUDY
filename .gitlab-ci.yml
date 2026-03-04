@@ -1,0 +1,100 @@
+# .gitlab-ci.yml
+# GitLab CI/CD Pipeline for Terraform
+
+# Use the official Terraform Docker image
+image:
+  name: hashicorp/terraform:1.7
+  entrypoint: [""]
+
+# Define variables used throughout the pipeline
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/environments/dev
+  TF_STATE_NAME: dev
+  # GitLab Managed Terraform State
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/79981965/terraform/state/${TF_STATE_NAME}
+
+# Cache Terraform plugins between jobs
+cache:
+  key: "${TF_ROOT}"
+  paths:
+    - ${TF_ROOT}/.terraform
+    - ${TF_ROOT}/.terraform.lock.hcl
+
+# Define pipeline stages
+stages:
+  - validate
+  - plan
+  - apply
+  - destroy
+
+# Commands to run before each job
+before_script:
+  - cd ${TF_ROOT}
+  - terraform --version
+  # Initialize Terraform with GitLab HTTP backend
+  - terraform init
+    -backend-config="address=${TF_ADDRESS}"
+    -backend-config="lock_address=${TF_ADDRESS}/lock"
+    -backend-config="unlock_address=${TF_ADDRESS}/lock"
+    -backend-config="username=gitlab-ci-token"
+    -backend-config="password=${CI_JOB_TOKEN}"
+    -backend-config="lock_method=POST"
+    -backend-config="unlock_method=DELETE"
+    -backend-config="retry_wait_min=5"
+
+# Job 1: Validate Terraform syntax and formatting
+validate:
+  stage: validate
+  script:
+    - terraform validate
+    - terraform fmt -check -recursive
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Job 2: Generate Terraform plan
+plan:
+  stage: plan
+  script:
+    - terraform plan -out=plan.tfplan
+    - terraform show -no-color plan.tfplan > plan.txt
+    - terraform show -json plan.tfplan > plan.json
+  artifacts:
+    name: plan
+    paths:
+      - ${TF_ROOT}/plan.tfplan
+      - ${TF_ROOT}/plan.txt
+      - ${TF_ROOT}/plan.json
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Job 3: Apply Terraform changes (manual trigger)
+apply:
+  stage: apply
+  script:
+    - terraform apply -auto-approve plan.tfplan
+  dependencies:
+    - plan
+  when: manual
+  only:
+    - main
+  environment:
+    name: dev
+    action: start
+
+# Job 4: Destroy infrastructure (manual trigger, protected)
+destroy:
+  stage: destroy
+  script:
+    - terraform destroy -auto-approve
+  when: manual
+  only:
+    - main
+  environment:
+    name: dev
+    action: stop
+
