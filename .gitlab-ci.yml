@@ -65,6 +65,8 @@ plan:
       - ${TF_ROOT}/plan.tfplan
       - ${TF_ROOT}/plan.txt
       - ${TF_ROOT}/plan.json
+      - ${TF_ROOT}/.terraform/          
+      - ${TF_ROOT}/.terraform.lock.hcl  
     reports:
       terraform: ${TF_ROOT}/plan.json
     expire_in: 7 days
