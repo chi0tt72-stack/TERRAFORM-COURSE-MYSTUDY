@@ -8,6 +8,16 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
+# SSH Key Pair for EC2 Access
+resource "aws_key_pair" "main" {
+  key_name   = "${var.environment}-key"
+  public_key = var.ssh_public_key
+
+  tags = merge(var.tags, {
+    Name = "${var.environment}-key"
+  })
+}
+
 resource "aws_security_group" "instance" {
   name        = "${var.environment}-instance-sg"
   description = "Security group for EC2 instances"
@@ -48,7 +58,8 @@ resource "aws_instance" "main" {
   subnet_id     = var.subnet_ids[count.index % length(var.subnet_ids)]
 
   vpc_security_group_ids = [aws_security_group.instance.id]
-
+  key_name               = aws_key_pair.main.key_name
+  
   tags = merge(var.tags, {
     Name = "${var.environment}-instance-${count.index + 1}"
   })
