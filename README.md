@@ -142,7 +142,7 @@ My AWS account has the following configured:
 
 This documents how I originally set up this project (for reference if I need to recreate it).
 
-##1. Created Project Structure
+### 1. Created Project Structure
 
 ```bash
 mkdir -p ~/TERRAFORM-COURSE-MYSTUDY
@@ -354,7 +354,7 @@ Manual triggers:
 
 ## Security Implementation
 
-Secrets Management Strategy
+### Secrets Management Strategy
 
 ```mermaid
 graph LR
@@ -395,14 +395,10 @@ graph LR
 
 ### What's in .gitignore
 
-*.tfstate - Terraform state files
-
-*.tfstate.* - Terraform state backups
-
-.terraform/ - Provider plugins
-
-terraform.tfvars - Variable values
-
+- `*.tfstate` - Terraform state files
+- `*.tfstate.*` - Terraform state backups
+- `.terraform/` - Provider plugins
+- `terraform.tfvars` - Variable values
 - `*.tfvars` - All variable files
 
 ### What's NEVER committed
@@ -414,9 +410,10 @@ terraform.tfvars - Variable values
 
 ### SSH Key Management
 
-*** Private key location:** ~/.ssh/terraform-course-key (local only) *** Public key location: *** AWS Secrets Manager terraform/ssh-public-key
+- **Private key location:** `~/.ssh/terraform-course-key` (local only)
+- **Public key location:** AWS Secrets Manager `terraform/ssh-public-key`
 
-###How it works:
+### How it works
 
 - Terraform reads public key from Secrets Manager
 - Creates AWS key pair with that public key
@@ -436,6 +433,126 @@ Security groups configured:
 - Server-side encryption (AES256)
 - Versioning enabled
 - Access logging enabled
-= Public access blocked
+- Public access blocked
 
 
+## Monitoring and Observability
+
+### CloudWatch Dashboard
+
+Dashboard name: `terraform-course-cursor-dev-cursor-dashboard`
+Metrics tracked:
+
+- EC2 CPU utilization
+- Network in/out
+- Disk read/write operations
+
+Access: AWS Console → CloudWatch → Dashboards
+
+### CloudWatch Alarms
+
+```mermaid
+graph TD
+    EC2[EC2 Instance] -->|Metrics| CW[CloudWatch]
+    
+    CW --> CPU{CPU > 80%<br/>for 5 min?}
+    CW --> DISK{Disk > 90%?}
+    
+    CPU -->|Yes| ALARM1[High CPU Alarm]
+    DISK -->|Yes| ALARM2[High Disk Alarm]
+    
+    ALARM1 --> SNS[SNS Topic]
+    ALARM2 --> SNS
+    
+    SNS --> EMAIL[Email Notification]
+    
+    style ALARM1 fill:#EA4335
+    style ALARM2 fill:#EA4335
+    style SNS fill:#FF9900
+```
+
+#### Configured alarms:
+
+1. **High CPU** - Triggers when CPU > 80% for 5 minutes
+2. **High Disk Usage** - Triggers when disk > 90%
+
+**Notifications:** Sent to SNS topic (configure email subscription in AWS Console)
+
+### Viewing Logs
+
+```bash
+# View EC2 instance logs
+aws logs tail /aws/ec2/instance-logs --follow
+
+# View CloudWatch log groups
+aws logs describe-log-groups
+```
+
+---
+
+## Troubleshooting
+
+Common issues I've encountered and how to resolve them:
+
+### Git Authentication Failed
+
+**Error:** Permission denied (publickey) when pushing to GitLab
+
+**Solution:**
+
+```bash
+git remote set-url origin https://gitlab.com/chi0tt72-stack/terraformioctest.git
+git push origin main
+```
+
+### Terraform State Lock
+
+**Error:** Error acquiring the state lock
+
+**Cause:** Previous pipeline job didn't complete properly
+
+**Solution:**
+
+```bash
+terraform force-unlock <LOCK_ID>
+# Get LOCK_ID from error message
+```
+
+### SSH Connection Refused
+
+**Error:** Cannot SSH to EC2 instance
+
+**Checklist:**
+- Is instance running? `aws ec2 describe-instances --instance-ids <id>`
+- Is security group allowing my IP? Check AWS Console
+- Am I using correct key? `ssh -i ~/.ssh/terraform-course-key`
+- Is IP correct? `terraform output instance_public_ip`
+
+**Debug command:**
+
+```bash
+ssh -v -i ~/.ssh/terraform-course-key ec2-user@<INSTANCE_IP>
+```
+
+### Pipeline Fails on Plan
+
+**Common causes:**
+- Syntax error in Terraform code
+- Missing variable in terraform.tfvars
+- AWS credentials expired
+- Backend state locked
+
+**Debug steps:**
+
+```bash
+cd ~/TERRAFORM-COURSE-MYSTUDY/environments/dev
+terraform validate
+terraform fmt -check
+terraform plan
+```
+
+### Resources Already Exist
+
+**Error:** Resource already exists when running apply
+
+**Cause:** Destroyed infrastructure manually but state file still
