@@ -25,7 +25,6 @@ module "compute" {
   instance_count    = var.instance_count
   instance_type     = var.instance_type
   allowed_ssh_cidrs = var.allowed_ssh_cidrs
-  ssh_public_key    = var.ssh_public_key
   tags              = var.tags
 }
 

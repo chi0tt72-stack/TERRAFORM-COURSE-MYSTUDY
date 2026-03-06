@@ -37,12 +37,6 @@ variable "allowed_ssh_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "ssh_public_key" {
-  description = "SSH public key for EC2 instance access"
-  type        = string
-  sensitive   = true
-}
-
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

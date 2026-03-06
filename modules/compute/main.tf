@@ -8,11 +8,20 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
+# Retrieve SSH public key from AWS Secrets Manager
+data "aws_secretsmanager_secret" "ssh_key" {
+  name = "terraform/ssh-public-key"
+}
+
+data "aws_secretsmanager_secret_version" "ssh_key" {
+  secret_id = data.aws_secretsmanager_secret.ssh_key.id
+}
+
 # SSH Key Pair for EC2 Access
 resource "aws_key_pair" "main" {
   key_name   = "${var.environment}-key"
-  public_key = var.ssh_public_key
-
+  public_key = data.aws_secretsmanager_secret_version.ssh_key.secret_string
+  
   tags = merge(var.tags, {
     Name = "${var.environment}-key"
   })

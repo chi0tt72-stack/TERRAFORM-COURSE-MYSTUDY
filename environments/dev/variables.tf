@@ -66,10 +66,3 @@ variable "enable_sns_notifications" {
   type        = bool
   default     = true
 }
-
-variable "ssh_public_key" {
-  description = "SSH public key for EC2 instance access"
-  type        = string
-  sensitive   = true
-}
-
