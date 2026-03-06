@@ -17,3 +17,9 @@ override.tf.json
 .env
 .env.*
 .DS_Store
+
+# Local Terraform files
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+.terraform.lock.hcl
