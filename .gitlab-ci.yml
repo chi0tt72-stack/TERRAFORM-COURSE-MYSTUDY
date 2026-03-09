@@ -40,38 +40,12 @@ before_script:
     fi
   - echo "JWT Token length is ${#JWT_TOKEN} characters"
   - echo "AWS Role ARN is ${AWS_ROLE_ARN}"
-  - |
-    echo "Attempting OIDC authentication..."
-    aws sts assume-role-with-web-identity \
-      --role-arn ${AWS_ROLE_ARN} \
-      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" \
-      --web-identity-token ${JWT_TOKEN} \
-      --duration-seconds 3600 \
-      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-      --output text > /tmp/credentials.txt 2>&1
-    
-    if [ $? -eq 0 ]; then
-      echo "✓ OIDC authentication successful!"
-      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $(cat /tmp/credentials.txt))
-      echo "✓ AWS credentials exported"
-      rm /tmp/credentials.txt
-    else
-      echo "✗ OIDC authentication FAILED!"
-      echo "Error details:"
-      cat /tmp/credentials.txt
-      rm /tmp/credentials.txt
-      exit 1
-    fi
-  - |
-    terraform init -reconfigure \
-      -backend-config="address=${TF_ADDRESS}" \
-      -backend-config="lock_address=${TF_ADDRESS}/lock" \
-      -backend-config="unlock_address=${TF_ADDRESS}/lock" \
-      -backend-config="username=gitlab-ci-token" \
-      -backend-config="password=${CI_JOB_TOKEN}" \
-      -backend-config="lock_method=POST" \
-      -backend-config="unlock_method=DELETE" \
-      -backend-config="retry_wait_min=5"
+  - echo "Attempting OIDC authentication..."
+  - echo "Running AWS STS command..."
+  - aws sts assume-role-with-web-identity --role-arn ${AWS_ROLE_ARN} --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" --web-identity-token ${JWT_TOKEN} --duration-seconds 3600 --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text > /tmp/creds.txt 2>&1 && echo "SUCCESS" || echo "FAILED"
+  - echo "Command completed, checking results..."
+  - cat /tmp/creds.txt
+  - echo "End of AWS output"
 
 validate:
   id_tokens:
