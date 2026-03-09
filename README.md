@@ -23,7 +23,7 @@ My personal Infrastructure as Code (IaC) project for learning and deploying AWS 
 ## Project Overview
 
 This is my learning project for mastering Terraform and AWS infrastructure automation. The project demonstrates:
-- Modular Terraform architecture
+- Modular Terraform architectur (test)e
 - GitLab CI/CD integration
 - AWS security best practices
 - Infrastructure monitoring with CloudWatch
