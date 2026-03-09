@@ -6,7 +6,7 @@ image:
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/environments/dev
   TF_STATE_NAME: dev
-  TF_ADDRESS: ${CI_API_V4_URL}/projects/79981965/terraform/state/${TF_STATE_NAME}
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_STATE_NAME}
   AWS_DEFAULT_REGION: us-east-1
   AWS_ROLE_ARN: arn:aws:iam::877833852920:role/GitLabTerraformRole
 
@@ -66,7 +66,16 @@ before_script:
   - export TF_HTTP_UNLOCK_METHOD=DELETE
   - export TF_HTTP_RETRY_WAIT_MIN=5
   - echo "Running terraform init..."
-  - terraform init
+  - |
+    terraform init \
+      -backend-config="address=${TF_HTTP_ADDRESS}" \
+      -backend-config="lock_address=${TF_HTTP_LOCK_ADDRESS}" \
+      -backend-config="unlock_address=${TF_HTTP_UNLOCK_ADDRESS}" \
+      -backend-config="username=${TF_HTTP_USERNAME}" \
+      -backend-config="password=${TF_HTTP_PASSWORD}" \
+      -backend-config="lock_method=${TF_HTTP_LOCK_METHOD}" \
+      -backend-config="unlock_method=${TF_HTTP_UNLOCK_METHOD}" \
+      -backend-config="retry_wait_min=${TF_HTTP_RETRY_WAIT_MIN}"
 
 validate:
   id_tokens:
@@ -134,3 +143,4 @@ destroy:
   environment:
     name: dev
     action: stop
+
