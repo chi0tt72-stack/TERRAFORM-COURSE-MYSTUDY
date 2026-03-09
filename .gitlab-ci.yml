@@ -22,10 +22,6 @@ stages:
   - apply
   - destroy
 
-.oidc_auth: &oidc_auth
-id_tokens:
-  GITLAB_OIDC_TOKEN:
-    aud: https://gitlab.com
 before_script:
   - cd ${TF_ROOT}
   - terraform --version
@@ -77,6 +73,9 @@ before_script:
       -backend-config="retry_wait_min=5"
 
 validate:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   stage: validate
   script:
     - terraform validate
@@ -86,6 +85,9 @@ validate:
     - if: '$CI_COMMIT_BRANCH == "main"'
 
 plan:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   stage: plan
   script:
     - terraform plan -out=plan.tfplan
@@ -107,6 +109,9 @@ plan:
     - if: '$CI_COMMIT_BRANCH == "main"'
 
 apply:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   stage: apply
   script:
     - terraform plan -out=plan.tfplan
@@ -121,6 +126,9 @@ apply:
     action: start
 
 destroy:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   stage: destroy
   script:
     - terraform destroy -auto-approve
