@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "vpc:*",
+        "elasticloadbalancing:*",
+        "autoscaling:*",
+        "cloudwatch:*",
+        "s3:*",
+        "sns:*",
+        "cloudformation:*",
+        "rds:*",
+        "sqs:*",
+        "ecs:*",
+        "iam:GetRole",
+        "iam:PassRole",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:ListSecrets"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

@@ -3,6 +3,11 @@ image:
   name: hashicorp/terraform:1.7
   entrypoint: [""]
 
+# Enable ID tokens (GitLab 15.7+)
+id_tokens:
+  GITLAB_OIDC_TOKEN:
+    aud: https://gitlab.com
+
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/environments/dev
   TF_STATE_NAME: dev
@@ -28,16 +33,39 @@ before_script:
   # Install AWS CLI for OIDC authentication
   - apk add --no-cache python3 py3-pip
   - pip3 install --break-system-packages --upgrade awscli
+  # Use GITLAB_OIDC_TOKEN (preferred) or fall back to CI_JOB_JWT_V2
+  - |
+    if [ -n "$GITLAB_OIDC_TOKEN" ]; then
+      echo "✓ Using GITLAB_OIDC_TOKEN"
+      JWT_TOKEN=$GITLAB_OIDC_TOKEN
+    elif [ -n "$CI_JOB_JWT_V2" ]; then
+      echo "✓ Using CI_JOB_JWT_V2"
+      JWT_TOKEN=$CI_JOB_JWT_V2
+    else
+      echo "✗ ERROR: No JWT token available!"
+      echo "Please enable ID tokens in GitLab settings"
+      exit 1
+    fi
   # Authenticate using OIDC
   - |
-    export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" \
-    $(aws sts assume-role-with-web-identity \
-    --role-arn ${AWS_ROLE_ARN} \
-    --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" \
-    --web-identity-token ${CI_JOB_JWT_V2} \
-    --duration-seconds 3600 \
-    --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-    --output text))
+    echo "Attempting OIDC authentication..."
+    CREDENTIALS=$(aws sts assume-role-with-web-identity \
+      --role-arn ${AWS_ROLE_ARN} \
+      --role-session-name "GitLabRunner-${CI_PROJECT_ID}-${CI_PIPELINE_ID}" \
+      --web-identity-token ${JWT_TOKEN} \
+      --duration-seconds 3600 \
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+      --output text 2>&1)
+    
+    if [ $? -eq 0 ]; then
+      echo "✓ OIDC authentication successful!"
+      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $CREDENTIALS)
+      echo "✓ AWS credentials exported"
+    else
+      echo "✗ OIDC authentication FAILED!"
+      echo "Error: $CREDENTIALS"
+      exit 1
+    fi
   - |
     terraform init -reconfigure \
       -backend-config="address=${TF_ADDRESS}" \
