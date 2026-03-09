@@ -73,7 +73,7 @@ before_script:
 validate:
   id_tokens:
     GITLAB_OIDC_TOKEN:
-      aud: gitlab.com
+      aud: https://gitlab.com
   stage: validate
   script:
     - terraform validate
@@ -85,7 +85,7 @@ validate:
 plan:
   id_tokens:
     GITLAB_OIDC_TOKEN:
-      aud: gitlab.com
+      aud: https://gitlab.com
   stage: plan
   script:
     - terraform plan -out=plan.tfplan
@@ -109,7 +109,7 @@ plan:
 apply:
   id_tokens:
     GITLAB_OIDC_TOKEN:
-      aud: gitlab.com
+      aud: https://gitlab.com
   stage: apply
   script:
     - terraform plan -out=plan.tfplan
@@ -126,7 +126,7 @@ apply:
 destroy:
   id_tokens:
     GITLAB_OIDC_TOKEN:
-      aud: gitlab.com
+      aud: https://gitlab.com
   stage: destroy
   script:
     - terraform destroy -auto-approve
