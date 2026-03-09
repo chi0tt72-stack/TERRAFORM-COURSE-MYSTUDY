@@ -39,8 +39,6 @@ before_script:
       exit 1
     fi
   - echo "JWT Token length is ${#JWT_TOKEN} characters"
-  - echo "Decoding JWT token to see claims..."
-  - echo ${JWT_TOKEN} | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' || echo "Could not decode"
   - echo "AWS Role ARN is ${AWS_ROLE_ARN}"
   - echo "Attempting OIDC authentication..."
   - echo "Running AWS STS command..."
@@ -49,7 +47,7 @@ before_script:
   - cat /tmp/creds.txt
   - echo "End of AWS output"
   - |
-    if grep -q "AKIA" /tmp/creds.txt; then
+    if grep -qE "ASIA|AKIA" /tmp/creds.txt; then
       echo "✓ Exporting AWS credentials..."
       export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" $(cat /tmp/creds.txt))
       echo "✓ AWS credentials exported"
@@ -136,4 +134,3 @@ destroy:
   environment:
     name: dev
     action: stop
-
