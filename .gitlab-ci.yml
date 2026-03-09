@@ -3,11 +3,6 @@ image:
   name: hashicorp/terraform:1.7
   entrypoint: [""]
 
-# Enable ID tokens (GitLab 15.7+)
-id_tokens:
-  GITLAB_OIDC_TOKEN:
-    aud: https://gitlab.com
-
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/environments/dev
   TF_STATE_NAME: dev
@@ -27,6 +22,10 @@ stages:
   - apply
   - destroy
 
+.oidc_auth: &oidc_auth
+id_tokens:
+  GITLAB_OIDC_TOKEN:
+    aud: https://gitlab.com
 before_script:
   - cd ${TF_ROOT}
   - terraform --version
