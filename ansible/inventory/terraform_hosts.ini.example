@@ -3,7 +3,7 @@
 # Use the same SSH key you use for EC2 (e.g. ~/.ssh/terraform-course-key).
 
 [dev_instances]
-instance_1 ansible_host=1.2.3.4
+instance_1 ansible_host=54.226.108.233
 
 [dev_instances:vars]
 ansible_user=ec2-user

@@ -32,9 +32,34 @@ Ansible is used here for **configuration management** of the EC2 instances that 
   ```
   If `ansible-playbook` is still not found, use: `python -m ansible.playbook playbooks/site.yml ...` from the `ansible` directory.
 
+## Testing Ansible only (no local Terraform)
+
+If you just want to run Ansible locally and don't need Terraform on your machine:
+
+1. **Apply Terraform in GitLab** (CI/CD → run the apply job) so the EC2 instance exists.
+2. **Get the instance public IP** from the pipeline output, GitLab Terraform state, or AWS EC2 console.
+3. **Create the inventory file** (once) with that IP:
+   ```bash
+   # In WSL, from repo root
+   mkdir -p ansible/inventory
+   echo "[dev_instances]
+   instance_1 ansible_host=YOUR_INSTANCE_IP
+
+   [dev_instances:vars]
+   ansible_user=ec2-user" > ansible/inventory/terraform_hosts.ini
+   ```
+   Replace `YOUR_INSTANCE_IP` with the real IP.
+4. **Run the playbook** (from WSL):
+   ```bash
+   cd ansible
+   ansible-playbook playbooks/site.yml -i inventory/terraform_hosts.ini -e ansible_ssh_private_key_file=~/.ssh/terraform-course-key
+   ```
+
+No local Terraform install or backend setup required for this.
+
 ## Quick start
 
-From the **repository root**:
+From the **repository root** (full flow with Terraform locally):
 
 ```bash
 # 1. Apply Terraform (creates/updates instances and writes Ansible inventory)
