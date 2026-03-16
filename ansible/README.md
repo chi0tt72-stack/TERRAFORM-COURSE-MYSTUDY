@@ -14,6 +14,19 @@ Ansible is used here for **configuration management** of the EC2 instances that 
 - Terraform already applied so EC2 instances exist and `ansible/inventory/terraform_hosts.ini` has been generated.
 - SSH access to the instances using the same key Terraform uses (e.g. the key whose public part is in AWS Secrets Manager `terraform/ssh-public-key`). Typically that key is at `~/.ssh/terraform-course-key` (or set `ansible_ssh_private_key_file`).
 
+### Installing Ansible on Windows
+
+- **Option A — WSL (recommended):** Install [WSL](https://docs.microsoft.com/en-us/windows/wsl/install), open an Ubuntu (or other) shell, then:
+  ```bash
+  sudo apt update && sudo apt install -y ansible
+  ```
+  Run all Ansible commands from that WSL shell (use the same paths under `/mnt/c/...` if your repo is on `C:\`).
+- **Option B — Python on Windows:** Install [Python 3](https://www.python.org/downloads/) (ensure "Add Python to PATH" is checked), open a new PowerShell, then:
+  ```powershell
+  pip install ansible
+  ```
+  If `ansible-playbook` is still not found, use: `python -m ansible.playbook playbooks/site.yml ...` from the `ansible` directory.
+
 ## Quick start
 
 From the **repository root**:
@@ -27,6 +40,12 @@ cd ../..
 # 2. Run Ansible (use the same SSH key you use for EC2)
 cd ansible
 ansible-playbook playbooks/site.yml -e ansible_ssh_private_key_file=~/.ssh/terraform-course-key
+```
+
+On **PowerShell**, use the full path or `$env:USERPROFILE` so the key path is expanded:
+```powershell
+cd ansible
+ansible-playbook playbooks/site.yml -e "ansible_ssh_private_key_file=$env:USERPROFILE\.ssh\terraform-course-key"
 ```
 
 Or set the key once in `group_vars/all.yml` (uncomment and set `ansible_ssh_private_key_file`), then:
