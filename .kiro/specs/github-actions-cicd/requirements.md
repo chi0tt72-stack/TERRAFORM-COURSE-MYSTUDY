@@ -19,6 +19,10 @@ This feature introduces a GitHub Actions CI/CD pipeline as a new, independent de
 - **Plan_Artifact**: The saved Terraform plan file uploaded as a GitHub Actions artifact between workflow stages
 - **Launch_Template**: An AWS EC2 launch template that defines the instance configuration (AMI, instance type, key pair, security groups) used by the Auto_Scaling_Group
 - **Web_Application_Stack**: The set of software packages (Apache httpd, PHP, WordPress, Python, MariaDB client) installed and configured on each EC2 instance by the Ansible_Runner
+- **ALB**: An AWS Application Load Balancer (internet-facing) that distributes incoming HTTP traffic across EC2 instances in the Auto_Scaling_Group
+- **ALB_Security_Group**: An AWS security group attached to the ALB that controls inbound and outbound traffic to the load balancer
+- **Target_Group**: An AWS ALB target group that registers EC2 instances in the Auto_Scaling_Group on port 80 and performs health checks
+- **ALB_Module**: A Terraform module (modules/alb/) that encapsulates all ALB, Target_Group, listener, and ALB_Security_Group resources
 
 ## Requirements
 
@@ -42,7 +46,7 @@ This feature introduces a GitHub Actions CI/CD pipeline as a new, independent de
 
 1. THE IAM_Role SHALL use a trust policy that references the GitHub OIDC_Provider (token.actions.githubusercontent.com)
 2. THE IAM_Role trust policy SHALL scope the allowed subject claim to the specific GitHub repository
-3. THE IAM_Role SHALL have an attached permissions policy granting access to EC2, Auto Scaling, VPC, S3, CloudWatch, SNS, IAM (GetRole, PassRole), Secrets Manager, and KMS resources
+3. THE IAM_Role SHALL have an attached permissions policy granting access to EC2, Auto Scaling, VPC, S3, CloudWatch, SNS, IAM (GetRole, PassRole), Secrets Manager, KMS, and Elastic Load Balancing (elasticloadbalancing:*) resources
 4. THE IAM_Role SHALL be independent from the existing GitLab IAM role
 
 ### Requirement 3: Secrets Management via AWS Secrets Manager
@@ -178,3 +182,70 @@ This feature introduces a GitHub Actions CI/CD pipeline as a new, independent de
 3. THE Pipeline SHALL read the S3 backend bucket name from GitHub Actions variables or hardcoded workflow values
 4. THE Pipeline SHALL read the Secrets_Manager secret names or ARNs from GitHub Actions variables or hardcoded workflow values
 5. THE Pipeline SHALL store zero values in GitHub Actions secrets
+
+
+### Requirement 14: Application Load Balancer Provisioning
+
+**User Story:** As a DevOps engineer, I want Terraform to provision an internet-facing Application Load Balancer in front of the Auto Scaling Group, so that HTTP traffic is distributed across the two WordPress EC2 instances.
+
+#### Acceptance Criteria
+
+1. THE ALB_Module SHALL provision an internet-facing ALB in the public subnets of the configured VPC
+2. THE ALB_Module SHALL attach the ALB_Security_Group to the ALB
+3. THE ALB_Module SHALL be located in the modules/alb/ directory following the same module structure as other Terraform modules in the project
+4. WHEN terraform apply completes, THE ALB SHALL be in an active state and reachable via its DNS name
+5. THE ALB_Module SHALL expose outputs for the ALB DNS name, ALB ARN, ALB_Security_Group ID, and Target_Group ARN
+
+### Requirement 15: ALB Security Group Configuration
+
+**User Story:** As a DevOps engineer, I want a dedicated security group for the ALB, so that inbound HTTP traffic from the internet is allowed while all other traffic is denied.
+
+#### Acceptance Criteria
+
+1. THE ALB_Module SHALL provision an ALB_Security_Group in the configured VPC
+2. THE ALB_Security_Group SHALL allow inbound TCP traffic on port 80 from 0.0.0.0/0 (all IPv4 addresses)
+3. THE ALB_Security_Group SHALL allow all outbound traffic to the VPC CIDR range
+4. THE ALB_Security_Group SHALL deny all inbound traffic on ports other than port 80
+
+### Requirement 16: ALB Target Group and Health Checks
+
+**User Story:** As a DevOps engineer, I want a target group with health checks on port 80, so that the ALB only routes traffic to healthy EC2 instances.
+
+#### Acceptance Criteria
+
+1. THE ALB_Module SHALL provision a Target_Group in the configured VPC with protocol HTTP and port 80
+2. THE Target_Group SHALL perform HTTP health checks on port 80 using the "/" path
+3. THE Target_Group SHALL use a health check interval of 30 seconds, a timeout of 5 seconds, a healthy threshold of 2, and an unhealthy threshold of 3
+4. WHEN an EC2 instance fails consecutive health checks, THE Target_Group SHALL mark the instance as unhealthy and stop routing traffic to the instance
+5. WHEN an unhealthy EC2 instance passes consecutive health checks, THE Target_Group SHALL mark the instance as healthy and resume routing traffic to the instance
+
+### Requirement 17: ALB HTTP Listener
+
+**User Story:** As a DevOps engineer, I want an HTTP listener on port 80, so that the ALB accepts incoming HTTP requests and forwards them to the target group.
+
+#### Acceptance Criteria
+
+1. THE ALB_Module SHALL provision an HTTP listener on the ALB on port 80
+2. THE HTTP listener SHALL forward all incoming requests to the Target_Group as the default action
+3. WHEN a request arrives on port 80 of the ALB, THE HTTP listener SHALL route the request to a healthy instance registered in the Target_Group
+
+### Requirement 18: Auto Scaling Group Integration with ALB
+
+**User Story:** As a DevOps engineer, I want the Auto Scaling Group to register its instances with the ALB target group, so that new and existing instances automatically receive traffic through the load balancer.
+
+#### Acceptance Criteria
+
+1. THE Auto_Scaling_Group SHALL reference the Target_Group ARN via the target_group_arns attribute
+2. WHEN a new EC2 instance is launched by the Auto_Scaling_Group, THE Auto_Scaling_Group SHALL automatically register the instance with the Target_Group
+3. WHEN an EC2 instance is terminated by the Auto_Scaling_Group, THE Auto_Scaling_Group SHALL automatically deregister the instance from the Target_Group
+4. THE ALB_Module SHALL pass the Target_Group ARN as an output consumed by the Auto_Scaling_Group module via the environment configuration
+
+### Requirement 19: EC2 Instance Security Group Update for ALB Traffic
+
+**User Story:** As a DevOps engineer, I want the EC2 instance security group to allow inbound HTTP traffic only from the ALB, so that instances are not directly accessible on port 80 from the internet.
+
+#### Acceptance Criteria
+
+1. THE Launch_Template security group SHALL allow inbound TCP traffic on port 80 only from the ALB_Security_Group
+2. THE Launch_Template security group SHALL deny inbound TCP traffic on port 80 from sources other than the ALB_Security_Group
+3. THE ALB_Module SHALL output the ALB_Security_Group ID so that the EC2 instance security group can reference the ALB_Security_Group as an allowed source

@@ -4,7 +4,7 @@
 
 This design introduces a GitHub Actions CI/CD pipeline that coexists alongside the existing GitLab CI/CD pipeline. The pipeline authenticates to AWS exclusively via GitHub OIDC federation (zero secrets in GitHub), retrieves all sensitive values from AWS Secrets Manager at runtime, manages Terraform state in a dedicated S3 backend, and orchestrates Terraform + Ansible workflows to provision and configure EC2 instances in an Auto Scaling Group.
 
-The pipeline is implemented as a set of GitHub Actions workflow YAML files under `.github/workflows/`. It reuses the existing Terraform modules (`compute`, `networking`, `storage`, `cloudwatch`) and Ansible playbooks (`ansible/playbooks/site.yml`) without modification. New Terraform resources are introduced only where the GitHub Actions path requires them (IAM OIDC provider, GitHub-specific IAM role, S3 backend for GitHub state, and a launch template / ASG to replace the current `aws_instance` count-based approach for the GitHub deployment path).
+The pipeline is implemented as a set of GitHub Actions workflow YAML files under `.github/workflows/`. It reuses the existing Terraform modules (`compute`, `networking`, `storage`, `cloudwatch`) and Ansible playbooks (`ansible/playbooks/site.yml`) without modification. New Terraform resources are introduced only where the GitHub Actions path requires them (IAM OIDC provider, GitHub-specific IAM role, S3 backend for GitHub state, a launch template / ASG to replace the current `aws_instance` count-based approach, and an internet-facing Application Load Balancer to distribute HTTP traffic across the ASG instances).
 
 ### Key Design Decisions
 
@@ -13,6 +13,7 @@ The pipeline is implemented as a set of GitHub Actions workflow YAML files under
 3. **ASG instead of count-based instances** — Requirement 8 mandates an Auto Scaling Group. A new `compute-asg` module (or an extension of the existing compute module) provides a launch template + ASG. The existing `compute` module remains untouched for GitLab.
 4. **Backend override via `-backend-config`** — The `versions.tf` backend block is changed to `backend "s3" {}` (empty) so both GitLab (http) and GitHub (s3) can supply their own backend config at `terraform init` time. Alternatively, a separate environment directory (`environments/dev-github/`) can be created to avoid touching the GitLab path entirely.
 5. **Ansible runs in the same workflow job** — After `terraform apply`, the pipeline writes the SSH key to a temp file, generates the inventory from Terraform outputs, and runs `ansible-playbook` in the same runner. No separate Ansible job is needed since the runner already has AWS credentials.
+6. **ALB module (`modules/alb/`)** — A dedicated Terraform module encapsulates the Application Load Balancer, its security group, target group, and HTTP listener. The ALB is internet-facing and placed in public subnets. The ASG registers instances via `target_group_arns`, and the EC2 instance security group restricts port 80 ingress to the ALB security group only (no direct internet access to instances on port 80).
 
 ## Architecture
 
@@ -87,8 +88,13 @@ flowchart LR
         DDB[DynamoDB / S3 Lock]
 
         subgraph VPC
+            ALB_SG[ALB Security Group\nport 80 from 0.0.0.0/0]
+            ALB[Application Load Balancer\ninternet-facing]
+            TG[Target Group\nHTTP :80 health checks]
+            Listener[HTTP Listener :80]
             ASG[Auto Scaling Group\nmin=2, desired=2]
             LT[Launch Template]
+            EC2_SG[Instance Security Group\nport 80 from ALB SG only]
             EC2A[EC2 Instance 1]
             EC2B[EC2 Instance 2]
         end
@@ -100,7 +106,16 @@ flowchart LR
     Role -->|read/write| S3B
     Role -->|lock| DDB
     Role -->|manage| ASG
+    Role -->|manage| ALB
+
+    ALB_SG --> ALB
+    ALB --> Listener
+    Listener --> TG
+    TG --> EC2A
+    TG --> EC2B
+    ASG -->|target_group_arns| TG
     ASG --> LT
+    LT --> EC2_SG
     ASG --> EC2A
     ASG --> EC2B
     GHA -->|SSH via key from SM| EC2A
@@ -193,16 +208,18 @@ Design choice: **Option B** — new `modules/compute-asg/` module.
 
 ```hcl
 # Inputs
-variable "environment"       { type = string }
-variable "vpc_id"            { type = string }
-variable "subnet_ids"        { type = list(string) }
-variable "instance_type"     { type = string, default = "t3.micro" }
-variable "min_size"          { type = number, default = 2 }
-variable "desired_capacity"  { type = number, default = 2 }
-variable "max_size"          { type = number, default = 4 }
-variable "ssh_public_key"    { type = string }
-variable "allowed_ssh_cidrs" { type = list(string) }
-variable "tags"              { type = map(string) }
+variable "environment"         { type = string }
+variable "vpc_id"              { type = string }
+variable "subnet_ids"          { type = list(string) }
+variable "instance_type"       { type = string, default = "t3.micro" }
+variable "min_size"            { type = number, default = 2 }
+variable "desired_capacity"    { type = number, default = 2 }
+variable "max_size"            { type = number, default = 4 }
+variable "ssh_public_key"      { type = string }
+variable "allowed_ssh_cidrs"   { type = list(string) }
+variable "alb_security_group_id" { type = string, description = "ALB SG ID for port 80 ingress" }
+variable "target_group_arns"   { type = list(string), default = [], description = "ALB target group ARNs" }
+variable "tags"                { type = map(string) }
 
 # Outputs
 output "asg_name"            { value = aws_autoscaling_group.main.name }
@@ -213,9 +230,142 @@ output "security_group_id"   { value = aws_security_group.instance.id }
 
 The module creates:
 - `aws_key_pair` from the SSH public key (retrieved from Secrets Manager by the caller)
-- `aws_security_group` (SSH + HTTP ingress, all egress)
+- `aws_security_group` (SSH ingress from allowed CIDRs + HTTP ingress from ALB security group only, all egress)
 - `aws_launch_template` (AMI, instance type, key pair, security group, tags)
-- `aws_autoscaling_group` (min=2, desired=2, max=variable, AZ distribution via subnet list)
+- `aws_autoscaling_group` (min=2, desired=2, max=variable, AZ distribution via subnet list, `target_group_arns` for ALB integration)
+
+The instance security group allows:
+- SSH (port 22) from `allowed_ssh_cidrs`
+- HTTP (port 80) from `alb_security_group_id` only (not `0.0.0.0/0`)
+- All outbound traffic
+
+### 4b. ALB Module (`modules/alb/`)
+
+A new `modules/alb/` module encapsulates the Application Load Balancer, its dedicated security group, target group, and HTTP listener.
+
+#### `modules/alb/` Interface
+
+```hcl
+# variables.tf
+variable "environment"  { type = string }
+variable "vpc_id"       { type = string }
+variable "subnet_ids"   { type = list(string), description = "Public subnet IDs for ALB placement" }
+variable "vpc_cidr"     { type = string, description = "VPC CIDR for outbound SG rule" }
+variable "tags"         { type = map(string), default = {} }
+
+# outputs.tf
+output "alb_dns_name"         { value = aws_lb.main.dns_name }
+output "alb_arn"              { value = aws_lb.main.arn }
+output "alb_security_group_id" { value = aws_security_group.alb.id }
+output "target_group_arn"     { value = aws_lb_target_group.main.arn }
+```
+
+#### Resources Created
+
+| Resource | Description |
+|----------|-------------|
+| `aws_security_group.alb` | ALB security group: ingress TCP 80 from `0.0.0.0/0`, egress all to VPC CIDR |
+| `aws_lb.main` | Internet-facing ALB in public subnets, attached to `aws_security_group.alb` |
+| `aws_lb_target_group.main` | Target group: protocol HTTP, port 80, health check on `/` with interval=30s, timeout=5s, healthy=2, unhealthy=3 |
+| `aws_lb_listener.http` | HTTP listener on port 80, default action forwards to `aws_lb_target_group.main` |
+
+#### ALB Security Group Rules
+
+```hcl
+resource "aws_security_group" "alb" {
+  name        = "${var.environment}-alb-sg"
+  description = "Security group for Application Load Balancer"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "HTTP from internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "All traffic to VPC"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.environment}-alb-sg"
+  })
+}
+```
+
+#### Target Group Health Check Configuration
+
+```hcl
+resource "aws_lb_target_group" "main" {
+  name     = "${var.environment}-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+
+  health_check {
+    enabled             = true
+    path                = "/"
+    port                = "80"
+    protocol            = "HTTP"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.environment}-tg"
+  })
+}
+```
+
+### 4c. Environment Wiring (`environments/dev-github/`)
+
+The `environments/dev-github/main.tf` wires the ALB module alongside the compute-asg module:
+
+```hcl
+module "alb" {
+  source = "../../modules/alb"
+
+  environment = var.environment
+  vpc_id      = module.networking.vpc_id
+  subnet_ids  = module.networking.public_subnet_ids
+  vpc_cidr    = var.vpc_cidr
+  tags        = var.tags
+}
+
+module "compute_asg" {
+  source = "../../modules/compute-asg"
+
+  environment           = var.environment
+  vpc_id                = module.networking.vpc_id
+  subnet_ids            = module.networking.public_subnet_ids
+  instance_type         = var.instance_type
+  min_size              = var.min_size
+  desired_capacity      = var.desired_capacity
+  max_size              = var.max_size
+  ssh_public_key        = var.ssh_public_key
+  allowed_ssh_cidrs     = var.allowed_ssh_cidrs
+  alb_security_group_id = module.alb.alb_security_group_id
+  target_group_arns     = [module.alb.target_group_arn]
+  tags                  = var.tags
+}
+```
+
+The `environments/dev-github/outputs.tf` exposes the ALB DNS name:
+
+```hcl
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = module.alb.alb_dns_name
+}
+```
 
 ### 5. Ansible Integration
 
@@ -394,7 +544,7 @@ Identical to the existing `gitlab-terraform-permissions.json` with the addition 
 
 ### Property 3: IAM permissions policy service completeness
 
-*For any* valid GitHub Actions permissions policy document, the `Action` list SHALL include actions for all required AWS services: EC2, Auto Scaling, S3, CloudWatch, SNS, IAM (GetRole, PassRole), Secrets Manager (GetSecretValue), and KMS (Decrypt). Formally: for each required service prefix in the set {ec2, autoscaling, s3, cloudwatch, sns, iam, secretsmanager, kms}, at least one action in the policy must match that prefix.
+*For any* valid GitHub Actions permissions policy document, the `Action` list SHALL include actions for all required AWS services: EC2, Auto Scaling, Elastic Load Balancing, S3, CloudWatch, SNS, IAM (GetRole, PassRole), Secrets Manager (GetSecretValue), and KMS (Decrypt). Formally: for each required service prefix in the set {ec2, autoscaling, elasticloadbalancing, s3, cloudwatch, sns, iam, secretsmanager, kms}, at least one action in the policy must match that prefix.
 
 **Validates: Requirements 2.3, 3.6**
 
@@ -434,6 +584,48 @@ Identical to the existing `gitlab-terraform-permissions.json` with the addition 
 
 **Validates: Requirements 8.1, 8.7**
 
+### Property 10: ALB is internet-facing with correct security group
+
+*For any* valid ALB Terraform resource in `modules/alb/`, the `internal` attribute SHALL be `false` (internet-facing), the `subnets` attribute SHALL reference the public subnet IDs variable, and the `security_groups` attribute SHALL reference the ALB security group resource.
+
+**Validates: Requirements 14.1, 14.2**
+
+### Property 11: ALB module outputs completeness
+
+*For any* valid ALB module outputs configuration, the module SHALL expose exactly these four outputs: ALB DNS name, ALB ARN, ALB security group ID, and target group ARN. Formally: for each required output name in the set {alb_dns_name, alb_arn, alb_security_group_id, target_group_arn}, the outputs file must contain a matching output block.
+
+**Validates: Requirements 14.5, 18.4, 19.3**
+
+### Property 12: ALB security group allows only port 80 inbound
+
+*For any* valid ALB security group Terraform resource, there SHALL be exactly one ingress rule allowing TCP port 80 from `0.0.0.0/0`, an egress rule allowing all traffic to the VPC CIDR, and no other ingress rules. The security group SHALL be associated with the configured VPC.
+
+**Validates: Requirements 15.1, 15.2, 15.3, 15.4**
+
+### Property 13: Target group health check configuration
+
+*For any* valid ALB target group Terraform resource, the protocol SHALL be HTTP, the port SHALL be 80, and the health check block SHALL specify: path = "/", port = "80", protocol = "HTTP", interval = 30, timeout = 5, healthy_threshold = 2, unhealthy_threshold = 3.
+
+**Validates: Requirements 16.1, 16.2, 16.3**
+
+### Property 14: HTTP listener forwards to target group
+
+*For any* valid ALB listener Terraform resource, the port SHALL be 80, the protocol SHALL be HTTP, and the default action SHALL be of type "forward" targeting the ALB target group.
+
+**Validates: Requirements 17.1, 17.2**
+
+### Property 15: ASG references target group ARNs
+
+*For any* valid Auto Scaling Group Terraform resource, the `target_group_arns` attribute SHALL be present and reference the ALB target group ARN, enabling automatic instance registration and deregistration.
+
+**Validates: Requirements 18.1**
+
+### Property 16: Instance security group restricts port 80 to ALB only
+
+*For any* valid EC2 instance security group in the compute-asg module, the port 80 ingress rule SHALL use `security_groups` referencing the ALB security group ID (not `cidr_blocks`). There SHALL be no port 80 ingress rule with `cidr_blocks = ["0.0.0.0/0"]`.
+
+**Validates: Requirements 19.1, 19.2**
+
 
 ## Error Handling
 
@@ -447,6 +639,8 @@ Identical to the existing `gitlab-terraform-permissions.json` with the addition 
 | `terraform fmt -check` fails | Step exits non-zero → job terminates | Run `terraform fmt` locally and push |
 | `terraform plan` fails | Step exits non-zero → job terminates, no artifact uploaded | Fix Terraform configuration errors |
 | `terraform apply` fails | Step exits non-zero → job terminates, plan artifact preserved for debugging | Inspect plan artifact and Terraform error output; fix and re-run |
+| ALB provisioning fails | Terraform apply exits non-zero (e.g., subnet misconfiguration, SG rule conflict) | Verify VPC/subnet IDs, check SG rule limits; fix and re-run |
+| ALB health checks fail | Target group marks instances unhealthy → ALB stops routing traffic | Verify httpd is running on instances, check SG allows port 80 from ALB SG |
 | `terraform destroy` fails | Step exits non-zero → job terminates | Inspect error, may need manual AWS console cleanup |
 | Ansible playbook fails on a host | Ansible exits non-zero, reports failed host → job terminates | SSH into failed host or inspect Ansible output; fix playbook and re-run |
 | SSH key file write fails | `echo` or `chmod` fails → step exits non-zero → job terminates | Check runner disk space and permissions |
@@ -503,6 +697,11 @@ Alternative: If the team prefers Python, [Hypothesis](https://hypothesis.readthe
 | Service enablement | httpd and php-fpm services have `state: started, enabled: yes` | Example |
 | WordPress installation | WordPress tasks exist in playbook | Example |
 | Cleanup step | `if: always()` condition on SSH key deletion step | Example |
+| ALB module structure | modules/alb/ contains main.tf, variables.tf, outputs.tf | Example |
+| ALB resource config | Internet-facing, references correct subnets and SG | Example |
+| ALB listener default action | Type "forward" to target group | Example |
+| Environment ALB wiring | main.tf passes ALB SG ID and TG ARN to compute-asg module | Example |
+| Environment ALB output | outputs.tf exposes alb_dns_name | Example |
 
 ### Property-Based Test Coverage
 
@@ -517,6 +716,13 @@ Alternative: If the team prefers Python, [Hypothesis](https://hypothesis.readthe
 | P7: SSH cleanup | Generate workflow structures with SSH key steps, verify cleanup step exists | Cleanup step with `if: always()` present |
 | P8: Path filters | Generate workflow trigger configs, verify path filters present | All three directory patterns in paths |
 | P9: Launch template | Generate launch template configs, verify required attributes | AMI, instance type, key pair, security group all present |
+| P10: ALB internet-facing | Generate ALB configs with varying internal/external settings, verify internet-facing with correct SG | `internal = false`, subnets and security_groups present |
+| P11: ALB outputs | Generate subsets of required ALB output names, verify actual module covers all | All four outputs (dns_name, arn, sg_id, tg_arn) present |
+| P12: ALB SG rules | Generate security group configs with varying ingress rules, verify only port 80 from 0.0.0.0/0 | Exactly one ingress rule on port 80, egress to VPC CIDR |
+| P13: Target group health check | Generate health check configs with varying parameters, verify correct values | Protocol HTTP, port 80, path /, interval 30, timeout 5, healthy 2, unhealthy 3 |
+| P14: HTTP listener | Generate listener configs, verify port 80 forward action | Port 80, protocol HTTP, default action forward to TG |
+| P15: ASG target group | Generate ASG configs, verify target_group_arns present | target_group_arns references ALB TG |
+| P16: Instance SG port 80 | Generate instance SG configs, verify port 80 uses security_groups not cidr_blocks | Port 80 ingress from ALB SG only, no 0.0.0.0/0 |
 
 ### Test File Organization
 
@@ -536,6 +742,13 @@ tests/
     ├── required-packages.property.test.ts  # Property 6
     ├── ssh-cleanup.property.test.ts        # Property 7
     ├── path-filters.property.test.ts       # Property 8
-    └── launch-template.property.test.ts    # Property 9
+    ├── launch-template.property.test.ts    # Property 9
+    ├── alb-resource.property.test.ts       # Property 10
+    ├── alb-outputs.property.test.ts        # Property 11
+    ├── alb-sg-rules.property.test.ts       # Property 12
+    ├── target-group.property.test.ts       # Property 13
+    ├── http-listener.property.test.ts      # Property 14
+    ├── asg-target-group.property.test.ts   # Property 15
+    └── instance-sg-alb.property.test.ts    # Property 16
 ```
 

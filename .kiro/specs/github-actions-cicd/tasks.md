@@ -2,11 +2,11 @@
 
 ## Overview
 
-Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS via OIDC, manages Terraform state in S3, provisions an Auto Scaling Group via a new `compute-asg` module, and runs Ansible playbooks post-apply. Each task builds on the previous, ending with full integration and test validation.
+Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS via OIDC, manages Terraform state in S3, provisions an Auto Scaling Group behind an Application Load Balancer via new `compute-asg` and `alb` modules, and runs Ansible playbooks post-apply. Each task builds on the previous, ending with full integration and test validation.
 
 ## Tasks
 
-- [ ] 1. Create IAM policy documents for GitHub Actions OIDC
+- [-] 1. Create IAM policy documents for GitHub Actions OIDC
   - [x] 1.1 Create `iam-policies/github-oidc-trust-policy.json`
     - Model after existing `gitlab-oidc-trust-policy.json`
     - Use `token.actions.githubusercontent.com` as the OIDC provider
@@ -23,6 +23,10 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
   - [x] 1.4 Write property test for IAM permissions policy service completeness
     - **Property 3: IAM permissions policy service completeness**
     - **Validates: Requirements 2.3, 3.6**
+  - [ ] 1.5 Update `iam-policies/github-terraform-permissions.json` to include `elasticloadbalancing:*`
+    - Add `elasticloadbalancing:*` to the Action list in the permissions policy
+    - This is needed for ALB, target group, and listener management
+    - _Requirements: 2.3, 14.1, 14.2_
 
 - [ ] 2. Set up `environments/dev-github/` directory with S3 backend
   - [ ] 2.1 Create `environments/dev-github/versions.tf`
@@ -34,22 +38,24 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
     - Ensure state key is distinct from any GitLab-managed state
     - _Requirements: 4.1, 4.2, 4.3_
   - [ ] 2.3 Create `environments/dev-github/variables.tf`
-    - Define all variables needed by the dev-github environment (mirror `environments/dev/variables.tf` and add ASG-specific variables)
-    - _Requirements: 8.3_
+    - Define all variables needed by the dev-github environment (mirror `environments/dev/variables.tf` and add ASG-specific and ALB-specific variables such as `vpc_cidr`)
+    - _Requirements: 8.3, 15.1_
   - [ ] 2.4 Create `environments/dev-github/terraform.tfvars`
     - Provide default values mirroring `environments/dev/terraform.tfvars`
     - _Requirements: 4.1_
 
 - [ ] 3. Create `modules/compute-asg/` Terraform module
   - [ ] 3.1 Create `modules/compute-asg/variables.tf`
-    - Define inputs: `environment`, `vpc_id`, `subnet_ids`, `instance_type`, `min_size` (default 2), `desired_capacity` (default 2), `max_size` (default 4), `ssh_public_key`, `allowed_ssh_cidrs`, `tags`
-    - _Requirements: 8.1, 8.3_
+    - Define inputs: `environment`, `vpc_id`, `subnet_ids`, `instance_type`, `min_size` (default 2), `desired_capacity` (default 2), `max_size` (default 4), `ssh_public_key`, `allowed_ssh_cidrs`, `alb_security_group_id`, `target_group_arns` (default []), `tags`
+    - `alb_security_group_id` is used to restrict port 80 ingress to ALB only
+    - `target_group_arns` is used to register ASG instances with the ALB target group
+    - _Requirements: 8.1, 8.3, 18.1, 19.1_
   - [ ] 3.2 Create `modules/compute-asg/main.tf`
     - Create `aws_key_pair` from `ssh_public_key` variable
-    - Create `aws_security_group` with SSH + HTTP ingress and all egress
+    - Create `aws_security_group` with SSH ingress from `allowed_ssh_cidrs`, HTTP (port 80) ingress from `var.alb_security_group_id` only (not 0.0.0.0/0), and all egress
     - Create `aws_launch_template` referencing AMI (via data source or variable), instance type, key pair, and security group
-    - Create `aws_autoscaling_group` with `min_size = var.min_size`, `desired_capacity = var.desired_capacity`, `max_size = var.max_size`, and `vpc_zone_identifier = var.subnet_ids` for AZ distribution
-    - _Requirements: 8.1, 8.2, 8.3, 8.5, 8.7_
+    - Create `aws_autoscaling_group` with `min_size = var.min_size`, `desired_capacity = var.desired_capacity`, `max_size = var.max_size`, `vpc_zone_identifier = var.subnet_ids` for AZ distribution, and `target_group_arns = var.target_group_arns`
+    - _Requirements: 8.1, 8.2, 8.3, 8.5, 8.7, 18.1, 19.1, 19.2_
   - [ ] 3.3 Create `modules/compute-asg/outputs.tf`
     - Output `asg_name`, `launch_template_id`, `instance_ips`, `security_group_id`
     - _Requirements: 8.2, 8.4_
@@ -59,30 +65,67 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
   - [ ]* 3.5 Write property test for launch template required attributes
     - **Property 9: Launch template required attributes**
     - **Validates: Requirements 8.1, 8.7**
+  - [ ]* 3.6 Write property test for ASG references target group ARNs
+    - **Property 15: ASG references target group ARNs**
+    - **Validates: Requirements 18.1**
+  - [ ]* 3.7 Write property test for instance security group restricts port 80 to ALB only
+    - **Property 16: Instance security group restricts port 80 to ALB only**
+    - **Validates: Requirements 19.1, 19.2**
 
-- [ ] 4. Wire `environments/dev-github/main.tf` and outputs
-  - [ ] 4.1 Create `environments/dev-github/main.tf`
+- [ ] 4. Create `modules/alb/` Terraform module
+  - [ ] 4.1 Create `modules/alb/variables.tf`
+    - Define inputs: `environment`, `vpc_id`, `subnet_ids` (public subnets), `vpc_cidr`, `tags`
+    - _Requirements: 14.1, 15.1_
+  - [ ] 4.2 Create `modules/alb/main.tf`
+    - Create `aws_security_group.alb` with ingress TCP 80 from `0.0.0.0/0` and egress all to `var.vpc_cidr`
+    - Create `aws_lb.main` as internet-facing ALB in public subnets, attached to `aws_security_group.alb`
+    - Create `aws_lb_target_group.main` with protocol HTTP, port 80, health check on `/` (interval=30, timeout=5, healthy=2, unhealthy=3)
+    - Create `aws_lb_listener.http` on port 80 with default action forwarding to `aws_lb_target_group.main`
+    - _Requirements: 14.1, 14.2, 15.1, 15.2, 15.3, 15.4, 16.1, 16.2, 16.3, 17.1, 17.2_
+  - [ ] 4.3 Create `modules/alb/outputs.tf`
+    - Output `alb_dns_name`, `alb_arn`, `alb_security_group_id`, `target_group_arn`
+    - _Requirements: 14.5, 18.4, 19.3_
+  - [ ]* 4.4 Write property test for ALB is internet-facing with correct security group
+    - **Property 10: ALB is internet-facing with correct security group**
+    - **Validates: Requirements 14.1, 14.2**
+  - [ ]* 4.5 Write property test for ALB module outputs completeness
+    - **Property 11: ALB module outputs completeness**
+    - **Validates: Requirements 14.5, 18.4, 19.3**
+  - [ ]* 4.6 Write property test for ALB security group allows only port 80 inbound
+    - **Property 12: ALB security group allows only port 80 inbound**
+    - **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
+  - [ ]* 4.7 Write property test for target group health check configuration
+    - **Property 13: Target group health check configuration**
+    - **Validates: Requirements 16.1, 16.2, 16.3**
+  - [ ]* 4.8 Write property test for HTTP listener forwards to target group
+    - **Property 14: HTTP listener forwards to target group**
+    - **Validates: Requirements 17.1, 17.2**
+
+- [ ] 5. Wire `environments/dev-github/main.tf` and outputs
+  - [ ] 5.1 Create `environments/dev-github/main.tf`
     - Reference existing modules: `modules/networking`, `modules/storage`, `modules/cloudwatch`
-    - Reference new `modules/compute-asg` instead of `modules/compute`
+    - Reference new `modules/alb` and `modules/compute-asg` instead of `modules/compute`
+    - Wire `module.alb.alb_security_group_id` to `compute-asg` module's `alb_security_group_id` input
+    - Wire `[module.alb.target_group_arn]` to `compute-asg` module's `target_group_arns` input
     - Pass SSH public key variable to `compute-asg` module
-    - _Requirements: 8.1, 8.2_
-  - [ ] 4.2 Create `environments/dev-github/outputs.tf`
-    - Output ASG name, instance IPs, VPC ID, bucket name
-    - _Requirements: 6.3_
-  - [ ] 4.3 Create `environments/dev-github/ansible.tf`
+    - _Requirements: 8.1, 8.2, 14.1, 18.1, 18.4, 19.1_
+  - [ ] 5.2 Create `environments/dev-github/outputs.tf`
+    - Output ASG name, instance IPs, VPC ID, bucket name, ALB DNS name
+    - _Requirements: 6.3, 14.4, 14.5_
+  - [ ] 5.3 Create `environments/dev-github/ansible.tf`
     - Use `local_file` resource to generate `ansible/inventory/terraform_hosts.ini` from compute-asg outputs
     - Format: `[dev_instances]` section with `instance_X ansible_host=<IP>` entries, plus `[dev_instances:vars]` with `ansible_user=ec2-user`
     - _Requirements: 8.6, 9.2_
-  - [ ]* 4.4 Write property test for inventory generation correctness
+  - [ ]* 5.4 Write property test for inventory generation correctness
     - **Property 5: Inventory generation correctness**
     - **Validates: Requirements 8.6**
 
-- [ ] 5. Checkpoint - Validate Terraform configuration
+- [ ] 6. Checkpoint - Validate Terraform configuration
   - Ensure all Terraform files are syntactically valid (`terraform validate` in `environments/dev-github/`)
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 6. Create GitHub Actions plan workflow
-  - [ ] 6.1 Create `.github/workflows/terraform-plan.yml`
+- [ ] 7. Create GitHub Actions plan workflow
+  - [ ] 7.1 Create `.github/workflows/terraform-plan.yml`
     - Trigger on `pull_request` (main) and `push` (main) with path filters for `environments/**`, `modules/**`, `ansible/**`
     - Set job permissions: `id-token: write`, `contents: read`, `pull-requests: write`
     - Add OIDC auth step using `aws-actions/configure-aws-credentials@v4` with `role-to-assume: ${{ vars.AWS_ROLE_ARN }}`
@@ -95,8 +138,8 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
     - Ensure zero references to `secrets.*` context — use only `vars.*` or hardcoded non-sensitive values
     - _Requirements: 1.1, 1.2, 1.5, 3.3, 3.4, 5.1, 5.2, 5.3, 5.4, 12.1, 12.4, 13.1, 13.2, 13.3, 13.4, 13.5_
 
-- [ ] 7. Create GitHub Actions apply workflow
-  - [ ] 7.1 Create `.github/workflows/terraform-apply.yml`
+- [ ] 8. Create GitHub Actions apply workflow
+  - [ ] 8.1 Create `.github/workflows/terraform-apply.yml`
     - Trigger on `push` (main) with path filters for `environments/**`, `modules/**`, `ansible/**`
     - Set job permissions: `id-token: write`, `contents: read`
     - Add OIDC auth step using `aws-actions/configure-aws-credentials@v4`
@@ -112,18 +155,18 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
     - If `terraform apply` fails, preserve plan artifact for debugging
     - Ensure zero references to `secrets.*` context
     - _Requirements: 1.1, 1.2, 1.5, 3.1, 3.2, 3.3, 6.1, 6.2, 6.3, 6.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 11.1, 11.2, 11.3, 11.4, 12.2, 12.4, 13.1, 13.5_
-  - [ ]* 7.2 Write property test for zero secrets in workflow files
+  - [ ]* 8.2 Write property test for zero secrets in workflow files
     - **Property 1: Zero secrets in GitHub workflow files**
     - **Validates: Requirements 1.5, 3.4, 13.1, 13.5**
-  - [ ]* 7.3 Write property test for SSH key cleanup on all exit paths
+  - [ ]* 8.3 Write property test for SSH key cleanup on all exit paths
     - **Property 7: SSH key cleanup on all exit paths**
     - **Validates: Requirements 11.4**
-  - [ ]* 7.4 Write property test for path filters on all workflow triggers
+  - [ ]* 8.4 Write property test for path filters on all workflow triggers
     - **Property 8: Path filters on all workflow triggers**
     - **Validates: Requirements 12.4**
 
-- [ ] 8. Create GitHub Actions destroy workflow
-  - [ ] 8.1 Create `.github/workflows/terraform-destroy.yml`
+- [ ] 9. Create GitHub Actions destroy workflow
+  - [ ] 9.1 Create `.github/workflows/terraform-destroy.yml`
     - Trigger on `workflow_dispatch` only (no path filters needed)
     - Set job permissions: `id-token: write`, `contents: read`
     - Add OIDC auth step using `aws-actions/configure-aws-credentials@v4`
@@ -134,37 +177,40 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
     - Ensure zero references to `secrets.*` context
     - _Requirements: 1.1, 1.5, 7.1, 7.2, 7.3, 7.4, 12.3, 13.1, 13.5_
 
-- [ ] 9. Checkpoint - Validate all workflow files and Ansible integration
+- [ ] 10. Checkpoint - Validate all workflow files and Ansible integration
   - Ensure all YAML workflow files are syntactically valid
   - Ensure all Terraform files pass `terraform validate`
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 10. Set up test infrastructure and write unit tests
-  - [ ] 10.1 Initialize test project with TypeScript and fast-check
+- [ ] 11. Set up test infrastructure and write unit tests
+  - [ ] 11.1 Initialize test project with TypeScript and fast-check
     - Create `tests/package.json` with dependencies: `vitest`, `fast-check`, `js-yaml`, `hcl2-json` (or equivalent HCL parser)
     - Create `tests/tsconfig.json`
     - Create `tests/vitest.config.ts`
     - _Requirements: All (testing infrastructure)_
-  - [ ] 10.2 Create `tests/unit/workflow-structure.test.ts`
+  - [ ] 11.2 Create `tests/unit/workflow-structure.test.ts`
     - Parse each workflow YAML file and validate: correct triggers, correct step ordering, `id-token: write` permission, environment references for approval gates, artifact upload in plan workflow, PR comment step in plan workflow
     - _Requirements: 1.1, 1.2, 5.1, 5.2, 5.3, 6.2, 7.2, 12.1, 12.2, 12.3_
-  - [ ] 10.3 Create `tests/unit/iam-policy.test.ts`
+  - [ ] 11.3 Create `tests/unit/iam-policy.test.ts`
     - Parse `github-oidc-trust-policy.json` and validate: OIDC provider URL, sub claim condition, aud claim condition
-    - Parse `github-terraform-permissions.json` and validate: all required service actions present
+    - Parse `github-terraform-permissions.json` and validate: all required service actions present (including `elasticloadbalancing:*`)
     - _Requirements: 1.4, 2.1, 2.2, 2.3_
-  - [ ] 10.4 Create `tests/unit/terraform-config.test.ts`
+  - [ ] 11.4 Create `tests/unit/terraform-config.test.ts`
     - Validate `environments/dev-github/versions.tf` has `backend "s3" {}`
     - Validate `github.s3.tfbackend` has distinct key from GitLab state
     - Validate `modules/compute-asg/main.tf` has launch template, ASG, key pair, security group resources
-    - _Requirements: 4.1, 4.2, 4.3, 8.1, 8.2_
-  - [ ] 10.5 Create `tests/unit/ansible-config.test.ts`
+    - Validate `modules/compute-asg/main.tf` security group restricts port 80 to ALB SG (uses `security_groups` not `cidr_blocks`)
+    - Validate `modules/alb/main.tf` has ALB, target group, listener, and ALB security group resources
+    - Validate `environments/dev-github/main.tf` wires ALB module and passes ALB SG ID and TG ARN to compute-asg
+    - _Requirements: 4.1, 4.2, 4.3, 8.1, 8.2, 14.1, 14.2, 18.1, 18.4, 19.1_
+  - [ ] 11.5 Create `tests/unit/ansible-config.test.ts`
     - Parse `ansible/playbooks/site.yml` and validate: all required packages (httpd, php, php-mysqlnd, php-fpm, php-json, php-xml, python3, pip, mariadb), httpd and php-fpm services enabled and started
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7_
-  - [ ]* 10.6 Write property test for required packages in Ansible playbook
+  - [ ]* 11.6 Write property test for required packages in Ansible playbook
     - **Property 6: Required packages in Ansible playbook**
     - **Validates: Requirements 10.1, 10.2, 10.4, 10.5**
 
-- [ ] 11. Final checkpoint - Ensure all tests pass
+- [ ] 12. Final checkpoint - Ensure all tests pass
   - Run full test suite: `cd tests && npm test`
   - Ensure all unit tests and property-based tests pass
   - Ensure all tests pass, ask the user if questions arise.
@@ -174,7 +220,7 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
 - Tasks marked with `*` are optional and can be skipped for faster MVP
 - Each task references specific requirements for traceability
 - Checkpoints ensure incremental validation
-- Property tests validate universal correctness properties from the design document (Properties 1-9)
-- Unit tests validate specific structural correctness of workflow YAML, Terraform HCL, IAM policy JSON, and Ansible playbooks
+- Property tests validate universal correctness properties from the design document (Properties 1-16)
+- Unit tests validate specific structural correctness of workflow YAML, Terraform HCL, IAM policy JSON, Ansible playbooks, and ALB module configuration
 - All tests use TypeScript with vitest and fast-check as specified in the design document
 - The existing GitLab pipeline (`environments/dev/`, `.gitlab-ci.yml`) is not modified by any task
