@@ -1,4 +1,4 @@
-bucket       = "multivar-databricks-chiottcbucket"
+bucket       = "github-terraform-state-chiottc"
 key          = "github/terraform.tfstate"
 region       = "us-east-1"
 use_lockfile = true
