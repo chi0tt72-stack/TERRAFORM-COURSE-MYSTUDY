@@ -6,7 +6,7 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
 
 ## Tasks
 
-- [-] 1. Create IAM policy documents for GitHub Actions OIDC
+- [x] 1. Create IAM policy documents for GitHub Actions OIDC
   - [x] 1.1 Create `iam-policies/github-oidc-trust-policy.json`
     - Model after existing `gitlab-oidc-trust-policy.json`
     - Use `token.actions.githubusercontent.com` as the OIDC provider
@@ -23,24 +23,24 @@ Incrementally build a GitHub Actions CI/CD pipeline that authenticates to AWS vi
   - [x] 1.4 Write property test for IAM permissions policy service completeness
     - **Property 3: IAM permissions policy service completeness**
     - **Validates: Requirements 2.3, 3.6**
-  - [ ] 1.5 Update `iam-policies/github-terraform-permissions.json` to include `elasticloadbalancing:*`
+  - [x] 1.5 Update `iam-policies/github-terraform-permissions.json` to include `elasticloadbalancing:*`
     - Add `elasticloadbalancing:*` to the Action list in the permissions policy
     - This is needed for ALB, target group, and listener management
     - _Requirements: 2.3, 14.1, 14.2_
 
-- [ ] 2. Set up `environments/dev-github/` directory with S3 backend
-  - [ ] 2.1 Create `environments/dev-github/versions.tf`
+- [x] 2. Set up `environments/dev-github/` directory with S3 backend
+  - [x] 2.1 Create `environments/dev-github/versions.tf`
     - Use `backend "s3" {}` (empty block, config supplied via `-backend-config`)
     - Copy `required_version` and `required_providers` from `environments/dev/versions.tf`
     - _Requirements: 4.1, 4.4_
-  - [ ] 2.2 Create `environments/dev-github/github.s3.tfbackend`
+  - [x] 2.2 Create `environments/dev-github/github.s3.tfbackend`
     - Set `bucket`, `key = "github/terraform.tfstate"`, `region = "us-east-1"`, `use_lockfile = true`
     - Ensure state key is distinct from any GitLab-managed state
     - _Requirements: 4.1, 4.2, 4.3_
-  - [ ] 2.3 Create `environments/dev-github/variables.tf`
+  - [x] 2.3 Create `environments/dev-github/variables.tf`
     - Define all variables needed by the dev-github environment (mirror `environments/dev/variables.tf` and add ASG-specific and ALB-specific variables such as `vpc_cidr`)
     - _Requirements: 8.3, 15.1_
-  - [ ] 2.4 Create `environments/dev-github/terraform.tfvars`
+  - [x] 2.4 Create `environments/dev-github/terraform.tfvars`
     - Provide default values mirroring `environments/dev/terraform.tfvars`
     - _Requirements: 4.1_
 

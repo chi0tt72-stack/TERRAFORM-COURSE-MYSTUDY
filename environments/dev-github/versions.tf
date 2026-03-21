@@ -1,0 +1,20 @@
+# environments/dev-github/versions.tf
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+
+  # GitHub Actions Managed Terraform State
+  # Backend configuration provided via -backend-config in CI/CD
+  backend "s3" {
+  }
+}
